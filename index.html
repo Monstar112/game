@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>开局托儿所 - 原型</title>
+  <style>
+    body {
+      margin: 0;
+      background: #222;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      font-family: sans-serif;
+    }
+    canvas {
+      background: #f0f0f0;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+<canvas id="game" width="420" height="700"></canvas>
+<script>
+// ========== 配置 ==========
+const ROWS = 16;
+const COLS = 10;
+const CELL = 36;
+const OFFSET_X = 30;
+const OFFSET_Y = 80;
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+// ========== 状态 ==========
+let grid = [];
+let score = 0;
+let timeLeft = 120;
+let gameOver = false;
+
+let dragging = false;
+let startCell = null;
+let endCell = null;
+
+// ========== 初始化矩阵 ==========
+function initGrid() {
+  grid = [];
+  for (let r = 0; r < ROWS; r++) {
+    grid[r] = [];
+    for (let c = 0; c < COLS; c++) {
+      grid[r][c] = Math.floor(Math.random() * 9) + 1;
+    }
+  }
+}
+
+// ========== 工具 ==========
+function toCell(x, y) {
+  const col = Math.floor((x - OFFSET_X) / CELL);
+  const row = Math.floor((y - OFFSET_Y) / CELL);
+  if (row >= 0 && row < ROWS && col >= 0 && col < COLS) {
+    return { row, col };
+  }
+  return null;
+}
+
+function getSelectionRect() {
+  if (!startCell || !endCell) return null;
+  return {
+    r1: Math.min(startCell.row, endCell.row),
+    r2: Math.max(startCell.row, endCell.row),
+    c1: Math.min(startCell.col, endCell.col),
+    c2: Math.max(startCell.col, endCell.col),
+  };
+}
+
+function isInSelection(r, c) {
+  const rect = getSelectionRect();
+  if (!rect) return false;
+  return r >= rect.r1 && r <= rect.r2 && c >= rect.c1 && c <= rect.c2;
+}
+
+// ========== 绘制 ==========
+function draw() {
+  ctx.fillStyle = '#f0f0f0';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // 顶部信息
+  ctx.fillStyle = '#333';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText('分数: ' + score, 30, 20);
+  ctx.textAlign = 'right';
+  ctx.fillText('时间: ' + timeLeft + 's', canvas.width - 30, 20);
+
+  // 网格
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const x = OFFSET_X + c * CELL;
+      const y = OFFSET_Y + r * CELL;
+      const v = grid[r][c];
+
+      if (v === 0) {
+        ctx.fillStyle = '#e0e0e0';
+        ctx.fillRect(x + 1, y + 1, CELL - 2, CELL - 2);
+        continue;
+      }
+
+      ctx.fillStyle = isInSelection(r, c) ? '#ffcc00' : '#ffffff';
+      ctx.fillRect(x + 1, y + 1, CELL - 2, CELL - 2);
+
+      ctx.fillStyle = '#333';
+      ctx.font = '16px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(v, x + CELL / 2, y + CELL / 2);
+    }
+  }
+
+  // ===== 虚拟选框 =====
+  const rect = getSelectionRect();
+  if (dragging && rect) {
+    const x = OFFSET_X + rect.c1 * CELL;
+    const y = OFFSET_Y + rect.r1 * CELL;
+    const w = (rect.c2 - rect.c1 + 1) * CELL;
+    const h = (rect.r2 - rect.r1 + 1) * CELL;
+
+    // 半透明填充，让整体范围更明显
+    ctx.fillStyle = 'rgba(255, 180, 0, 0.15)';
+    ctx.fillRect(x, y, w, h);
+
+    // 实线外框
+    ctx.strokeStyle = '#ff9500';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
+
+    // 虚线内框，做出“选区”的感觉
+    ctx.setLineDash([6, 4]);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x + 4, y + 4, w - 8, h - 8);
+    ctx.setLineDash([]);
+  }
+
+  // 游戏结束遮罩
+  if (gameOver) {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 36px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('时间到', canvas.width / 2, canvas.height / 2 - 80);
+
+    ctx.font = 'bold 28px sans-serif';
+    ctx.fillText('分数: ' + score, canvas.width / 2, canvas.height / 2 - 20);
+
+    ctx.font = '20px sans-serif';
+    ctx.fillStyle = '#ffcc00';
+    ctx.fillText('点击屏幕重新开始', canvas.width / 2, canvas.height / 2 + 50);
+  }
+}
+
+// ========== 计算选中区域的和 ==========
+function selectionSum() {
+  const rect = getSelectionRect();
+  if (!rect) return 0;
+  let sum = 0;
+  for (let r = rect.r1; r <= rect.r2; r++) {
+    for (let c = rect.c1; c <= rect.c2; c++) {
+      sum += grid[r][c];
+    }
+  }
+  return sum;
+}
+
+// ========== 消除 ==========
+function tryEliminate() {
+  const rect = getSelectionRect();
+  if (!rect) return;
+
+  const sum = selectionSum();
+  if (sum !== 10) return;
+
+  let count = 0;
+  for (let r = rect.r1; r <= rect.r2; r++) {
+    for (let c = rect.c1; c <= rect.c2; c++) {
+      if (grid[r][c] !== 0) count++;
+    }
+  }
+
+  for (let r = rect.r1; r <= rect.r2; r++) {
+    for (let c = rect.c1; c <= rect.c2; c++) {
+      grid[r][c] = 0;
+    }
+  }
+
+  score += count;
+}
+
+// ========== 重新开始 ==========
+function restart() {
+  initGrid();
+  score = 0;
+  timeLeft = 120;
+  gameOver = false;
+  dragging = false;
+  startCell = null;
+  endCell = null;
+  draw();
+}
+
+// ========== 鼠标事件 ==========
+canvas.addEventListener('mousedown', (e) => {
+  if (gameOver) {
+    restart();
+    return;
+  }
+  const rect = canvas.getBoundingClientRect();
+  const cell = toCell(e.clientX - rect.left, e.clientY - rect.top);
+  if (!cell) return;
+  dragging = true;
+  startCell = cell;
+  endCell = cell;
+  draw();
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  if (!dragging) return;
+  const rect = canvas.getBoundingClientRect();
+  const cell = toCell(e.clientX - rect.left, e.clientY - rect.top);
+  if (cell) {
+    endCell = cell;
+    draw();
+  }
+});
+
+canvas.addEventListener('mouseup', () => {
+  if (!dragging) return;
+  dragging = false;
+  tryEliminate();
+  startCell = null;
+  endCell = null;
+  draw();
+});
+
+// ========== 触摸事件 ==========
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (gameOver) {
+    restart();
+    return;
+  }
+  const rect = canvas.getBoundingClientRect();
+  const t = e.touches[0];
+  const cell = toCell(t.clientX - rect.left, t.clientY - rect.top);
+  if (!cell) return;
+  dragging = true;
+  startCell = cell;
+  endCell = cell;
+  draw();
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (!dragging) return;
+  const rect = canvas.getBoundingClientRect();
+  const t = e.touches[0];
+  const cell = toCell(t.clientX - rect.left, t.clientY - rect.top);
+  if (cell) {
+    endCell = cell;
+    draw();
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  if (!dragging) return;
+  dragging = false;
+  tryEliminate();
+  startCell = null;
+  endCell = null;
+  draw();
+}, { passive: false });
+
+// ========== 倒计时 ==========
+setInterval(() => {
+  if (gameOver) return;
+  if (timeLeft > 0) {
+    timeLeft--;
+    draw();
+  } else {
+    gameOver = true;
+    draw();
+  }
+}, 1000);
+
+// ========== 启动 ==========
+initGrid();
+draw();
+</script>
+</body>
+</html>
